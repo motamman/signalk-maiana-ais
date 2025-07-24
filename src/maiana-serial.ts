@@ -1,0 +1,157 @@
+/*
+ * MAIANA Serial Communication
+ * 
+ * Adapted from the MAIANA AIS Transponder project by Peter Antypas
+ * Original work: https://github.com/peterantypas/maiana
+ * Copyright (C) Peter Antypas
+ * 
+ * SignalK plugin adaptation:
+ * Copyright (C) 2024 Maurice Tamman
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
+import { SerialPort } from 'serialport';
+import { ReadlineParser } from '@serialport/parser-readline';
+import { EventEmitter } from 'eventemitter3';
+import type { PluginOptions } from './types';
+
+export class MaianaSerial extends EventEmitter {
+  private port?: SerialPort;
+  private parser?: ReadlineParser;
+  private devicePath: string;
+  private baudRate: number;
+  private connected = false;
+  private reconnectTimer?: NodeJS.Timeout;
+  private reconnectInterval = 5000;
+
+  constructor(options: PluginOptions) {
+    super();
+    
+    this.devicePath = options.devicePath || '/dev/ttyUSB0';
+    this.baudRate = options.baudRate || 38400;
+  }
+
+  async connect(): Promise<void> {
+    try {
+      this.port = new SerialPort({
+        path: this.devicePath,
+        baudRate: this.baudRate,
+        autoOpen: false
+      });
+
+      this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\\r\\n' }));
+
+      this.port.on('open', () => {
+        this.connected = true;
+        this.emit('connected');
+        console.log(`MAIANA: Connected to ${this.devicePath}`);
+      });
+
+      this.port.on('close', () => {
+        this.connected = false;
+        this.emit('disconnected');
+        console.log('MAIANA: Disconnected');
+        this.scheduleReconnect();
+      });
+
+      this.port.on('error', (error: Error) => {
+        this.emit('error', error);
+        console.error('MAIANA Serial Error:', error.message);
+        this.scheduleReconnect();
+      });
+
+      this.parser.on('data', (line: string) => {
+        this.handleIncomingData(line.trim());
+      });
+
+      await this.port.open();
+    } catch (error) {
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+
+    if (this.port && this.port.isOpen) {
+      await this.port.close();
+    }
+
+    this.connected = false;
+    this.port = undefined;
+    this.parser = undefined;
+  }
+
+  async sendCommand(command: string): Promise<void> {
+    if (!this.connected || !this.port) {
+      throw new Error('MAIANA not connected');
+    }
+
+    return new Promise((resolve, reject) => {
+      this.port!.write(command + '\\r\\n', (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  private handleIncomingData(line: string): void {
+    if (!line) return;
+
+    // Handle different types of MAIANA messages
+    if (line.startsWith('!AIVDM') || line.startsWith('!AIVDO')) {
+      // AIS VDM/VDO messages
+      this.emit('ais-message', line);
+    } else if (line.startsWith('$PAISYS')) {
+      // MAIANA system messages
+      this.emit('system-message', line);
+    } else if (line.startsWith('$PAIPOS')) {
+      // MAIANA position report
+      this.emit('position-message', line);
+    } else if (line.startsWith('$PAICFG')) {
+      // MAIANA configuration message
+      this.emit('config-message', line);
+    } else {
+      // Generic NMEA or unknown message
+      this.emit('raw-message', line);
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = undefined;
+      try {
+        console.log('MAIANA: Attempting to reconnect...');
+        await this.connect();
+      } catch (error) {
+        console.error('MAIANA: Reconnection failed:', error);
+        this.scheduleReconnect();
+      }
+    }, this.reconnectInterval);
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  getStatus() {
+    return {
+      connected: this.connected,
+      devicePath: this.devicePath,
+      baudRate: this.baudRate
+    };
+  }
+}
