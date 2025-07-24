@@ -22,6 +22,7 @@ This plugin provides **device control** for MAIANA AIS transponders. For **data 
 ### 1. Install the Plugin
 
 ```bash
+cd ~/.signalk/node_modules
 npm install motamman/signalk-maiana-ais
 ```
 
