@@ -53,22 +53,6 @@ export = function(app: any): PluginInstance {
           default: 38400,
           enum: [9600, 19200, 38400, 57600, 115200]
         },
-        portOffset: {
-          type: 'number',
-          title: 'Port Offset (meters)',
-          description: 'Distance from GPS antenna to port side',
-          minimum: 0,
-          maximum: 63,
-          default: 0
-        },
-        bowOffset: {
-          type: 'number',
-          title: 'Bow Offset (meters)',
-          description: 'Distance from GPS antenna to bow',
-          minimum: 0,
-          maximum: 511,
-          default: 0
-        },
         enableTransmit: {
           type: 'boolean',
           title: 'Enable Transmission',
@@ -91,7 +75,7 @@ export = function(app: any): PluginInstance {
           type: 'string',
           title: 'Transmit Control Path',
           description: 'SignalK path for transmission control',
-          default: 'communication.ais.transmit.state'
+          default: 'commands.ais.transmit.state'
         }
       }
     }),
@@ -221,13 +205,18 @@ export = function(app: any): PluginInstance {
     return {
       mmsi: app.getSelfPath('mmsi'),
       name: app.getSelfPath('name'),
-      callsign: app.getSelfPath('communication.callsignRadio'),
+      callsign: app.getSelfPath('communication.callsignVhf'),
       design: {
         length: app.getSelfPath('design.length.overall'),
-        beam: app.getSelfPath('design.beam')
+        beam: app.getSelfPath('design.beam'),
+        draft: app.getSelfPath('design.draft.maximum'),
+        aisShipType: app.getSelfPath('design.aisShipType')
       },
-      aishub: {
-        shipType: app.getSelfPath('aishub.shipType')
+      sensors: {
+        gps: {
+          fromBow: app.getSelfPath('sensors.gps.fromBow.value'),
+          fromCenter: app.getSelfPath('sensors.gps.fromCenter.value')
+        }
       }
     };
   }
@@ -246,8 +235,8 @@ export = function(app: any): PluginInstance {
 
     // Map SignalK ship type to MAIANA-supported values (30, 34, 36, 37)
     let shipType = 37; // Default to "Other"
-    if (vesselData.aishub?.shipType) {
-      const signalKType = vesselData.aishub.shipType;
+    if (vesselData.design?.aisShipType) {
+      const signalKType = vesselData.design.aisShipType;
       if ([30, 34, 36, 37].includes(signalKType)) {
         shipType = signalKType;
       }
@@ -261,8 +250,8 @@ export = function(app: any): PluginInstance {
       shipType,
       Math.round(vesselData.design?.length || 0),
       Math.round(vesselData.design?.beam || 0),
-      currentOptions.portOffset || 0,
-      currentOptions.bowOffset || 0
+      Math.round(vesselData.sensors?.gps?.fromCenter || 0), // port offset (from center)
+      Math.round(vesselData.sensors?.gps?.fromBow || 0)     // bow offset
     ];
 
     const command = `station ${stationParams.join(',')}`;
@@ -292,7 +281,7 @@ export = function(app: any): PluginInstance {
   }
 
   function setupPutControl(): void {
-    const controlPath = currentOptions.transmitControlPath || 'communication.ais.transmit.state';
+    const controlPath = currentOptions.transmitControlPath || 'commands.ais.transmit.state';
     
     // Create PUT handler
     const putHandler = (

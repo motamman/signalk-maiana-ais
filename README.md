@@ -46,11 +46,9 @@ In SignalK Admin UI → **Server → Plugin Config → MAIANA AIS Controller**:
 
 #### Optional Settings  
 - **Baud Rate**: Communication speed (default: 38400)
-- **Port Offset**: Distance from GPS antenna to port side in meters (default: 0)
-- **Bow Offset**: Distance from GPS antenna to bow in meters (default: 0)
 - **Enable Transmission**: Allow the transponder to transmit AIS messages (default: false)
 - **Enable PUT Control**: Allow external control of transmission via PUT requests (default: false)
-- **Transmit Control Path**: SignalK path for transmission control (default: `communication.ais.transmit.state`)
+- **Transmit Control Path**: SignalK path for transmission control (default: `commands.ais.transmit.state`)
 - **Debug Mode**: Enable debug logging (default: false)
 
 > **Note**: The plugin uses the same serial port as your data connection for sending commands. Both can safely share the same port.
@@ -61,10 +59,13 @@ The plugin automatically uses vessel data from SignalK system settings instead o
 
 - **MMSI**: From `vessels.self.mmsi`
 - **Vessel Name**: From `vessels.self.name`
-- **Call Sign**: From `vessels.self.communication.callsignRadio`
+- **Call Sign**: From `vessels.self.communication.callsignVhf`
 - **Length**: From `vessels.self.design.length.overall`
 - **Beam**: From `vessels.self.design.beam`
-- **Ship Type**: From `vessels.self.aishub.shipType` (limited to MAIANA-supported values: 30, 34, 36, 37)
+- **Draft**: From `vessels.self.design.draft.maximum`
+- **Ship Type**: From `vessels.self.design.aisShipType` (limited to MAIANA-supported values: 30, 34, 36, 37)
+- **GPS Distance From Bow**: From `vessels.self.sensors.gps.fromBow.value`
+- **GPS Distance From Center**: From `vessels.self.sensors.gps.fromCenter.value`
 
 ## API Endpoints
 

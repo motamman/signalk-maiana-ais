@@ -17,8 +17,6 @@
 export interface PluginOptions {
   devicePath?: string;
   baudRate?: number;
-  portOffset?: number;
-  bowOffset?: number;
   enableTransmit?: boolean;
   enablePutControl?: boolean;
   transmitControlPath?: string;
