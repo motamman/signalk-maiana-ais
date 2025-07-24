@@ -17,41 +17,24 @@
 export interface PluginOptions {
   devicePath?: string;
   baudRate?: number;
-  ownMMSI?: number;
+  portOffset?: number;
+  bowOffset?: number;
   enableTransmit?: boolean;
-  transmitInterval?: number;
+  enablePutControl?: boolean;
+  transmitControlPath?: string;
   debug?: boolean;
-}
-
-export interface AISMessage {
-  mmsi: number;
-  messageType: number;
-  timestamp: Date;
-  latitude?: number;
-  longitude?: number;
-  speedOverGround?: number;
-  courseOverGround?: number;
-  trueHeading?: number;
-  navigationStatus?: number;
-  rateOfTurn?: number;
-  shipName?: string;
-  callsign?: string;
-  dimensions?: {
-    to_bow: number;
-    to_stern: number;
-    to_port: number;
-    to_starboard: number;
-  };
-  shipType?: number;
 }
 
 export interface SignalKDelta {
   context: string;
   updates: Array<{
     source: {
-      label: string;
+      sentence: string;
+      talker: string;
       type: string;
+      label: string;
     };
+    $source: string;
     timestamp: string;
     values: Array<{
       path: string;
@@ -78,4 +61,5 @@ export interface PluginInstance {
   start: (options: PluginOptions) => void;
   stop: () => void;
   statusForLog: () => MaianaStatus;
+  registerWithRouter?: (router: any) => void;
 }

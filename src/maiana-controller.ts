@@ -1,11 +1,9 @@
 /*
- * MAIANA Serial Communication
+ * MAIANA Device Controller
  * 
- * Adapted from the MAIANA AIS Transponder project by Peter Antypas
- * Original work: https://github.com/peterantypas/maiana
- * Copyright (C) Peter Antypas
+ * Handles MAIANA AIS transponder device control and configuration
+ * Serial communication for command sending only - AIS parsing handled by SignalK data connections
  * 
- * SignalK plugin adaptation:
  * Copyright (C) 2024 Maurice Tamman
  * 
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +17,7 @@ import { ReadlineParser } from '@serialport/parser-readline';
 import { EventEmitter } from 'eventemitter3';
 import type { PluginOptions } from './types';
 
-export class MaianaSerial extends EventEmitter {
+export class MaianaController extends EventEmitter {
   private port?: SerialPort;
   private parser?: ReadlineParser;
   private devicePath: string;
@@ -43,29 +41,30 @@ export class MaianaSerial extends EventEmitter {
         autoOpen: false
       });
 
-      this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\\r\\n' }));
+      this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
 
       this.port.on('open', () => {
         this.connected = true;
         this.emit('connected');
-        console.log(`MAIANA: Connected to ${this.devicePath}`);
+        console.log(`MAIANA: Connected to ${this.devicePath} for device control`);
       });
 
       this.port.on('close', () => {
         this.connected = false;
         this.emit('disconnected');
-        console.log('MAIANA: Disconnected');
+        console.log('MAIANA: Control connection disconnected');
         this.scheduleReconnect();
       });
 
       this.port.on('error', (error: Error) => {
         this.emit('error', error);
-        console.error('MAIANA Serial Error:', error.message);
+        console.error('MAIANA Control Error:', error.message);
         this.scheduleReconnect();
       });
 
+      // We only listen for responses to our commands, not AIS data
       this.parser.on('data', (line: string) => {
-        this.handleIncomingData(line.trim());
+        this.handleResponse(line.trim());
       });
 
       await this.port.open();
@@ -92,11 +91,11 @@ export class MaianaSerial extends EventEmitter {
 
   async sendCommand(command: string): Promise<void> {
     if (!this.connected || !this.port) {
-      throw new Error('MAIANA not connected');
+      throw new Error('MAIANA controller not connected');
     }
 
     return new Promise((resolve, reject) => {
-      this.port!.write(command + '\\r\\n', (error) => {
+      this.port!.write(command + '\r\n', (error) => {
         if (error) {
           reject(error);
         } else {
@@ -106,26 +105,18 @@ export class MaianaSerial extends EventEmitter {
     });
   }
 
-  private handleIncomingData(line: string): void {
+  private handleResponse(line: string): void {
     if (!line) return;
 
-    // Handle different types of MAIANA messages
+    // Handle command responses and status messages
+    // AIS data (!AIVDM/!AIVDO) will be handled by SignalK data connection
     if (line.startsWith('!AIVDM') || line.startsWith('!AIVDO')) {
-      // AIS VDM/VDO messages
-      this.emit('ais-message', line);
-    } else if (line.startsWith('$PAISYS')) {
-      // MAIANA system messages
-      this.emit('system-message', line);
-    } else if (line.startsWith('$PAIPOS')) {
-      // MAIANA position report
-      this.emit('position-message', line);
-    } else if (line.startsWith('$PAICFG')) {
-      // MAIANA configuration message
-      this.emit('config-message', line);
-    } else {
-      // Generic NMEA or unknown message
-      this.emit('raw-message', line);
+      // Ignore AIS data - handled by SignalK data connection
+      return;
     }
+
+    // Handle command responses and system messages
+    this.emit('response', line);
   }
 
   private scheduleReconnect(): void {
@@ -134,10 +125,10 @@ export class MaianaSerial extends EventEmitter {
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = undefined;
       try {
-        console.log('MAIANA: Attempting to reconnect...');
+        console.log('MAIANA: Attempting to reconnect control connection...');
         await this.connect();
       } catch (error) {
-        console.error('MAIANA: Reconnection failed:', error);
+        console.error('MAIANA: Control reconnection failed:', error);
         this.scheduleReconnect();
       }
     }, this.reconnectInterval);

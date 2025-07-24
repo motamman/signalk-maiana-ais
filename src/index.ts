@@ -14,13 +14,14 @@
  * (at your option) any later version.
  */
 
-import { MaianaSerial } from './maiana-serial';
-import { AISParser } from './ais-parser';
+import { MaianaController } from './maiana-controller';
 import type { PluginOptions, MaianaStatus, PluginInstance } from './types';
 
 export = function(app: any): PluginInstance {
-  let maianaSerial: MaianaSerial;
-  let aisParser: AISParser;
+  let maianaController: MaianaController;
+  let currentOptions: PluginOptions = {};
+  let transmitEnabled = false;
+  const putHandlers = new Map();
   const status: MaianaStatus = {
     connected: false,
     transmitting: false,
@@ -32,8 +33,8 @@ export = function(app: any): PluginInstance {
 
   const plugin: PluginInstance = {
     id: 'maiana-ais',
-    name: 'MAIANA AIS Transponder',
-    description: 'Plugin for interfacing with MAIANA AIS transponders',
+    name: 'MAIANA AIS Transponder Controller',
+    description: 'Plugin for controlling MAIANA AIS transponder configuration and transmission (AIS data parsing handled by SignalK data connections)',
 
     schema: () => ({
       type: 'object',
@@ -52,12 +53,21 @@ export = function(app: any): PluginInstance {
           default: 38400,
           enum: [9600, 19200, 38400, 57600, 115200]
         },
-        ownMMSI: {
+        portOffset: {
           type: 'number',
-          title: 'Own MMSI',
-          description: 'Your vessel\'s MMSI number for transmission',
-          minimum: 200000000,
-          maximum: 799999999
+          title: 'Port Offset (meters)',
+          description: 'Distance from GPS antenna to port side',
+          minimum: 0,
+          maximum: 63,
+          default: 0
+        },
+        bowOffset: {
+          type: 'number',
+          title: 'Bow Offset (meters)',
+          description: 'Distance from GPS antenna to bow',
+          minimum: 0,
+          maximum: 511,
+          default: 0
         },
         enableTransmit: {
           type: 'boolean',
@@ -65,19 +75,23 @@ export = function(app: any): PluginInstance {
           description: 'Allow the transponder to transmit AIS messages',
           default: false
         },
-        transmitInterval: {
-          type: 'number',
-          title: 'Transmit Interval (seconds)',
-          description: 'Interval between AIS transmissions',
-          default: 30,
-          minimum: 5,
-          maximum: 300
-        },
         debug: {
           type: 'boolean',
           title: 'Debug Mode',
           description: 'Enable debug logging',
           default: false
+        },
+        enablePutControl: {
+          type: 'boolean',
+          title: 'Enable PUT Control',
+          description: 'Allow external control of transmission via PUT requests',
+          default: false
+        },
+        transmitControlPath: {
+          type: 'string',
+          title: 'Transmit Control Path',
+          description: 'SignalK path for transmission control',
+          default: 'communication.ais.transmit.state'
         }
       }
     }),
@@ -85,19 +99,30 @@ export = function(app: any): PluginInstance {
     start: (options: PluginOptions) => {
       try {
         app.debug('Starting MAIANA AIS plugin with options:', options);
+        currentOptions = { ...options };
+        
+        // Initialize transmission state from configuration
+        transmitEnabled = options.enableTransmit || false;
 
-        // Initialize serial communication
-        maianaSerial = new MaianaSerial(options);
-        aisParser = new AISParser(options.ownMMSI);
+        // Initialize MAIANA controller
+        maianaController = new MaianaController(options);
 
         // Set up event handlers
         setupEventHandlers();
 
-        // Connect to MAIANA device
-        maianaSerial.connect()
+        // Connect to MAIANA device for control
+        maianaController.connect()
           .then(() => {
-            app.debug('MAIANA AIS plugin started successfully');
+            app.debug('MAIANA controller connected successfully');
             status.connected = true;
+            
+            // Configure MAIANA with vessel data from SignalK
+            configureMAIANA();
+            
+            // Setup PUT control if enabled
+            if (options.enablePutControl) {
+              setupPutControl();
+            }
           })
           .catch((error: Error) => {
             app.error('Failed to connect to MAIANA device:', error.message);
@@ -114,13 +139,16 @@ export = function(app: any): PluginInstance {
     stop: () => {
       app.debug('Stopping MAIANA AIS plugin');
       
-      if (maianaSerial) {
-        maianaSerial.disconnect()
+      // Clean up PUT handlers
+      putHandlers.clear();
+      
+      if (maianaController) {
+        maianaController.disconnect()
           .then(() => {
-            app.debug('MAIANA AIS plugin stopped');
+            app.debug('MAIANA controller stopped');
           })
           .catch((error: Error) => {
-            app.error('Error stopping MAIANA AIS plugin:', error.message);
+            app.error('Error stopping MAIANA controller:', error.message);
           });
       }
 
@@ -131,84 +159,241 @@ export = function(app: any): PluginInstance {
 
     statusForLog: () => {
       return status;
+    },
+
+    registerWithRouter: (router: any) => {
+      router.post('/reconfigure', (req: any, res: any) => {
+        try {
+          if (!maianaController || !maianaController.isConnected()) {
+            return res.status(400).json({ error: 'MAIANA controller not connected' });
+          }
+          
+          configureMAIANA()
+            .then(() => {
+              res.json({ status: 'ok', message: 'MAIANA reconfigured with current vessel data' });
+            })
+            .catch((error: Error) => {
+              app.error('Error reconfiguring MAIANA:', error);
+              res.status(500).json({ error: 'Failed to reconfigure MAIANA: ' + error.message });
+            });
+        } catch (error) {
+          app.error('Error reconfiguring MAIANA:', error);
+          res.status(500).json({ error: 'Failed to reconfigure MAIANA' });
+        }
+      });
+
+      router.get('/vessel-data', (req: any, res: any) => {
+        const vesselData = getVesselDataFromSignalK();
+        res.json(vesselData);
+      });
     }
   };
 
   function setupEventHandlers(): void {
-    maianaSerial.on('connected', () => {
-      app.debug('MAIANA device connected');
+    maianaController.on('connected', () => {
+      app.debug('MAIANA controller connected');
       status.connected = true;
       app.emit('maiana-connected');
     });
 
-    maianaSerial.on('disconnected', () => {
-      app.debug('MAIANA device disconnected');
+    maianaController.on('disconnected', () => {
+      app.debug('MAIANA controller disconnected');
       status.connected = false;
       status.transmitting = false;
       status.receiving = false;
       app.emit('maiana-disconnected');
     });
 
-    maianaSerial.on('error', (error: Error) => {
-      app.error('MAIANA serial error:', error.message);
+    maianaController.on('error', (error: Error) => {
+      app.error('MAIANA controller error:', error.message);
       status.errors++;
       app.emit('maiana-error', error);
     });
 
-    maianaSerial.on('ais-message', (sentence: string) => {
-      try {
-        status.messagesReceived++;
-        status.receiving = true;
-        
-        const aisMessage = aisParser.parseAISMessage(sentence);
-        if (aisMessage) {
-          const delta = aisParser.createSignalKDelta(aisMessage);
-          app.handleMessage('maiana-ais', delta);
-          
-          app.debug('AIS message processed:', {
-            mmsi: aisMessage.mmsi,
-            messageType: aisMessage.messageType
-          });
-        }
-      } catch (error) {
-        app.error('Error processing AIS message:', error);
-        status.errors++;
-      }
-    });
-
-    maianaSerial.on('system-message', (sentence: string) => {
-      app.debug('MAIANA system message:', sentence);
-      // Handle MAIANA-specific system messages
-      handleSystemMessage(sentence);
-    });
-
-    maianaSerial.on('position-message', (sentence: string) => {
-      app.debug('MAIANA position message:', sentence);
-      // Handle position reports from MAIANA
-    });
-
-    maianaSerial.on('config-message', (sentence: string) => {
-      app.debug('MAIANA config message:', sentence);
-      // Handle configuration messages
-    });
-
-    maianaSerial.on('raw-message', (sentence: string) => {
-      if (app.debug.enabled) {
-        app.debug('Raw MAIANA message:', sentence);
-      }
+    maianaController.on('response', (response: string) => {
+      app.debug('MAIANA response:', response);
+      // Handle command responses and status messages
+      handleMaianaResponse(response);
     });
   }
 
-  function handleSystemMessage(sentence: string): void {
-    // Parse MAIANA system messages
-    // $PAISYS,status,transmitting,receiving,...
-    if (sentence.startsWith('$PAISYS')) {
-      const parts = sentence.split(',');
-      if (parts.length >= 4) {
-        status.transmitting = parts[2] === '1';
-        status.receiving = parts[3] === '1';
+  function getVesselDataFromSignalK() {
+    return {
+      mmsi: app.getSelfPath('mmsi'),
+      name: app.getSelfPath('name'),
+      callsign: app.getSelfPath('communication.callsignRadio'),
+      design: {
+        length: app.getSelfPath('design.length.overall'),
+        beam: app.getSelfPath('design.beam')
+      },
+      aishub: {
+        shipType: app.getSelfPath('aishub.shipType')
+      }
+    };
+  }
+
+  async function configureMAIANA(): Promise<void> {
+    if (!maianaController || !maianaController.isConnected()) {
+      throw new Error('MAIANA controller not connected');
+    }
+
+    const vesselData = getVesselDataFromSignalK();
+    
+    // Validate required data
+    if (!vesselData.mmsi) {
+      throw new Error('MMSI not configured in vessel settings');
+    }
+
+    // Map SignalK ship type to MAIANA-supported values (30, 34, 36, 37)
+    let shipType = 37; // Default to "Other"
+    if (vesselData.aishub?.shipType) {
+      const signalKType = vesselData.aishub.shipType;
+      if ([30, 34, 36, 37].includes(signalKType)) {
+        shipType = signalKType;
       }
     }
+
+    // Build MAIANA station command: mmsi,name,callsign,type,len,beam,portoffset,bowoffset
+    const stationParams = [
+      vesselData.mmsi || '',
+      vesselData.name || '',
+      vesselData.callsign || '',
+      shipType,
+      Math.round(vesselData.design?.length || 0),
+      Math.round(vesselData.design?.beam || 0),
+      currentOptions.portOffset || 0,
+      currentOptions.bowOffset || 0
+    ];
+
+    const command = `station ${stationParams.join(',')}`;
+    
+    app.debug('Configuring MAIANA with command:', command);
+    await maianaController.sendCommand(command);
+    
+    // Enable transmission if configured
+    if (transmitEnabled) {
+      await maianaController.sendCommand('tx on');
+    } else {
+      await maianaController.sendCommand('tx off');
+    }
+  }
+
+  function handleMaianaResponse(response: string): void {
+    // Handle MAIANA command responses and status messages
+    // AIS data (!AIVDM/!AIVDO) is handled by SignalK data connection
+    app.debug('MAIANA response:', response);
+    
+    // Parse any status information from responses
+    // Most responses are just acknowledgments or error messages
+    if (response.includes('tx')) {
+      // Could parse transmission status updates here
+      app.debug('Transmission status response:', response);
+    }
+  }
+
+  function setupPutControl(): void {
+    const controlPath = currentOptions.transmitControlPath || 'communication.ais.transmit.state';
+    
+    // Create PUT handler
+    const putHandler = (
+      context: string,
+      requestPath: string,
+      value: any,
+      callback?: (result: { state: string; statusCode?: number }) => void
+    ): { state: string; statusCode?: number } => {
+      app.debug(`PUT request received for ${requestPath} with value: ${JSON.stringify(value)}`);
+      
+      if (requestPath === controlPath) {
+        const newState = Boolean(value);
+        handleTransmitControl(newState);
+        
+        // Update plugin configuration so checkbox reflects the change
+        updatePluginConfig();
+        
+        // Publish updated state
+        const updatedDelta = createSignalKDelta(controlPath, newState);
+        app.handleMessage(plugin.id, updatedDelta);
+        
+        const result = { state: 'COMPLETED' };
+        if (callback) callback(result);
+        return result;
+      } else {
+        const result = { state: 'COMPLETED', statusCode: 405 };
+        if (callback) callback(result);
+        return result;
+      }
+    };
+    
+    // Register PUT handler with SignalK
+    app.registerPutHandler('vessels.self', controlPath, putHandler, 'maiana-ais');
+    
+    // Store handler for cleanup
+    putHandlers.set(controlPath, putHandler);
+    
+    // Publish current state
+    const initialDelta = createSignalKDelta(controlPath, transmitEnabled);
+    app.handleMessage(plugin.id, initialDelta);
+    
+    app.debug(`PUT control enabled for transmission on path: ${controlPath}`);
+  }
+  
+  function handleTransmitControl(newState: boolean): void {
+    if (newState !== transmitEnabled) {
+      app.debug(`${newState ? 'Enabling' : 'Disabling'} transmission via PUT control`);
+      
+      transmitEnabled = newState;
+      
+      if (maianaController && maianaController.isConnected()) {
+        const command = newState ? 'tx on' : 'tx off';
+        maianaController.sendCommand(command)
+          .then(() => {
+            app.debug(`Transmission ${newState ? 'enabled' : 'disabled'}`);
+          })
+          .catch((error: Error) => {
+            app.error('Error controlling transmission:', error.message);
+          });
+      }
+      
+      app.setProviderStatus(`MAIANA transmission ${newState ? 'enabled' : 'disabled'} via external control`);
+    }
+  }
+  
+  function updatePluginConfig(): void {
+    if (!currentOptions) return;
+    
+    const updatedConfig = {
+      ...currentOptions,
+      enableTransmit: transmitEnabled
+    };
+    
+    app.savePluginOptions(updatedConfig, (err?: any) => {
+      if (err) {
+        app.error('Could not save plugin configuration: ' + err.message);
+      } else {
+        app.debug('Plugin configuration updated to match PUT state changes');
+        currentOptions = updatedConfig;
+      }
+    });
+  }
+  
+  function createSignalKDelta(path: string, value: any) {
+    return {
+      context: 'vessels.self',
+      updates: [{
+        source: {
+          sentence: 'CONTROL',
+          talker: 'AI',
+          type: 'NMEA0183',
+          label: 'ais'
+        },
+        $source: 'ais.AI',
+        timestamp: new Date().toISOString(),
+        values: [{
+          path: path,
+          value: value
+        }]
+      }]
+    };
   }
 
   return plugin;
