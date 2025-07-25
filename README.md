@@ -26,6 +26,7 @@ This plugin provides **device control** for MAIANA AIS transponders. For **data 
 ```bash
 cd ~/.signalk/node_modules
 npm install motamman/signalk-maiana-ais
+sudo systemctl restart signalk
 ```
 
 ### 2. Create NMEA0183 Data Connection
