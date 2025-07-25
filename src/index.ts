@@ -59,18 +59,6 @@ export = function(app: any): PluginInstance {
           description: 'Allow the transponder to transmit AIS messages',
           default: false
         },
-        debug: {
-          type: 'boolean',
-          title: 'Debug Mode',
-          description: 'Enable debug logging',
-          default: false
-        },
-        enablePutControl: {
-          type: 'boolean',
-          title: 'Enable PUT Control',
-          description: 'Allow external control of transmission via PUT requests',
-          default: false
-        },
         transmitControlPath: {
           type: 'string',
           title: 'Transmit Control Path',
@@ -93,6 +81,9 @@ export = function(app: any): PluginInstance {
 
         // Set up event handlers
         setupEventHandlers();
+        
+        // Setup PUT control (always enabled)
+        setupPutControl();
 
         // Connect to MAIANA device for control
         maianaController.connect()
@@ -102,11 +93,6 @@ export = function(app: any): PluginInstance {
             
             // Configure MAIANA with vessel data from SignalK
             configureMAIANA();
-            
-            // Setup PUT control if enabled
-            if (options.enablePutControl) {
-              setupPutControl();
-            }
           })
           .catch((error: Error) => {
             app.error('Failed to connect to MAIANA device:', error.message);

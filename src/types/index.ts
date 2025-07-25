@@ -18,9 +18,7 @@ export interface PluginOptions {
   devicePath?: string;
   baudRate?: number;
   enableTransmit?: boolean;
-  enablePutControl?: boolean;
   transmitControlPath?: string;
-  debug?: boolean;
 }
 
 export interface SignalKDelta {

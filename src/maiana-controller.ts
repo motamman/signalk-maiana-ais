@@ -46,19 +46,19 @@ export class MaianaController extends EventEmitter {
       this.port.on('open', () => {
         this.connected = true;
         this.emit('connected');
-        console.log(`MAIANA: Connected to ${this.devicePath} for device control`);
+        // Connected to device for control
       });
 
       this.port.on('close', () => {
         this.connected = false;
         this.emit('disconnected');
-        console.log('MAIANA: Control connection disconnected');
+        // Control connection disconnected
         this.scheduleReconnect();
       });
 
       this.port.on('error', (error: Error) => {
         this.emit('error', error);
-        console.error('MAIANA Control Error:', error.message);
+        // Control error handled by event emission
         this.scheduleReconnect();
       });
 
@@ -125,10 +125,10 @@ export class MaianaController extends EventEmitter {
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = undefined;
       try {
-        console.log('MAIANA: Attempting to reconnect control connection...');
+        // Attempting to reconnect control connection
         await this.connect();
       } catch (error) {
-        console.error('MAIANA: Control reconnection failed:', error);
+        // Control reconnection failed
         this.scheduleReconnect();
       }
     }, this.reconnectInterval);
