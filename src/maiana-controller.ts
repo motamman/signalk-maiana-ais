@@ -4,7 +4,7 @@
  * Handles MAIANA AIS transponder device control and configuration
  * Serial communication for command sending only - AIS parsing handled by SignalK data connections
  * 
- * Copyright (C) 2024 Maurice Tamman
+ * Copyright (C) 2025 Maurice Tamman
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

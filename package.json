@@ -1,6 +1,6 @@
 {
   "name": "signalk-maiana-ais",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "MAIANA AIS Transponder plugin for Signal K",
   "keywords": [
     "signalk-node-server-plugin",

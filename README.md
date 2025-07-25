@@ -1,5 +1,7 @@
 # SignalK MAIANA AIS Controller Plugin
 
+**WARNING: THIS CODE IS LARGELY UNTESTED. VENTURE FORTH AT YOUR OWN RISK.**
+
 A SignalK plugin for controlling MAIANA AIS Transponder configuration and transmission.
 
 ## Overview

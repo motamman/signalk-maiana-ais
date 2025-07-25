@@ -6,7 +6,7 @@
  * Copyright (C) Peter Antypas
  * 
  * SignalK plugin adaptation:
- * Copyright (C) 2024 Maurice Tamman
+ * Copyright (C) 2025 Maurice Tamman
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
