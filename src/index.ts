@@ -273,20 +273,21 @@ export = function(app: any): PluginInstance {
     let fromBow = 0;
     let fromCenter = 0;
     
-    // Try to extract length
+    // Try to extract length - SignalK has design.length as {"overall":16}
     if (typeof designLengthOverall === 'number') {
       vesselLength = designLengthOverall;
     } else if (typeof designLength === 'number') {
       vesselLength = designLength;
+    } else if (designLength && typeof designLength === 'object') {
+      // SignalK returns design.length as {"overall":16}
+      if (typeof designLength.overall === 'number') {
+        vesselLength = designLength.overall;
+      } else if (designLength.value !== undefined) {
+        vesselLength = designLength.value;
+      }
     } else if (designFull && designFull.length) {
-      if (designFull.length.value !== undefined) {
-        vesselLength = designFull.length.value;
-      } else if (designFull.length.overall) {
-        if (typeof designFull.length.overall === 'number') {
-          vesselLength = designFull.length.overall;
-        } else if (designFull.length.overall.value !== undefined) {
-          vesselLength = designFull.length.overall.value;
-        }
+      if (typeof designFull.length.overall === 'number') {
+        vesselLength = designFull.length.overall;
       } else if (typeof designFull.length === 'number') {
         vesselLength = designFull.length;
       }
@@ -299,13 +300,15 @@ export = function(app: any): PluginInstance {
       vesselBeam = designBeam.value;
     }
     
-    // Try to extract AIS ship type
+    // Try to extract AIS ship type - SignalK has {"name": "Sailing", "id": 36}
     if (typeof designAisShipType === 'number') {
       aisShipType = designAisShipType;
-    } else if (designAisShipType && designAisShipType.value !== undefined) {
-      aisShipType = designAisShipType.value;
-    } else if (designAisShipType && designAisShipType.id !== undefined) {
-      aisShipType = designAisShipType.id;
+    } else if (designAisShipType && typeof designAisShipType === 'object') {
+      if (typeof designAisShipType.id === 'number') {
+        aisShipType = designAisShipType.id;
+      } else if (designAisShipType.value !== undefined) {
+        aisShipType = designAisShipType.value;
+      }
     }
     
     // Try to extract GPS offsets
