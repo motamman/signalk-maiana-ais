@@ -168,6 +168,26 @@ export = function(app: any): PluginInstance {
         };
         res.json(debugInfo);
       });
+
+      router.get('/reconfigure-now', (req: any, res: any) => {
+        try {
+          if (!maianaController || !maianaController.isConnected()) {
+            return res.status(400).json({ error: 'MAIANA controller not connected' });
+          }
+          
+          configureMAIANA()
+            .then(() => {
+              res.json({ status: 'ok', message: 'MAIANA reconfigured via GET request' });
+            })
+            .catch((error: Error) => {
+              app.error('Error reconfiguring MAIANA:', error);
+              res.status(500).json({ error: 'Failed to reconfigure MAIANA: ' + error.message });
+            });
+        } catch (error) {
+          app.error('Error reconfiguring MAIANA:', error);
+          res.status(500).json({ error: 'Failed to reconfigure MAIANA' });
+        }
+      });
     }
   };
 
