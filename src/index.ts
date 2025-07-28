@@ -223,33 +223,66 @@ export = function(app: any): PluginInstance {
   }
 
   function getVesselDataFromSignalK() {
-    // Helper function to safely extract values
-    const getValue = (path: string) => {
+    // Helper function to safely extract values with better debugging
+    const getValue = (path: string, description: string = '') => {
       const data = app.getSelfPath(path);
+      console.log(`🔍 DEBUG - ${description}${path}:`, JSON.stringify(data, null, 2));
       return data?.value !== undefined ? data.value : data;
     };
 
-    // Debug what we're actually getting from SignalK
-    const designData = app.getSelfPath('design') || {};
-    const lengthData = designData.length || {};
+    // Try different SignalK paths that might contain vessel data
+    console.log('🔍 DEBUG - Testing all possible vessel data paths:');
+    const mmsi = getValue('mmsi', 'MMSI ');
+    const name = getValue('name', 'Name ');
+    const callsign = getValue('communication.callsignVhf', 'Callsign ');
     
-    console.log('🔍 DEBUG - Raw design data:', JSON.stringify(designData, null, 2));
-    console.log('🔍 DEBUG - Raw length data:', JSON.stringify(lengthData, null, 2));
+    // Try various design paths
+    const designFull = getValue('design', 'Full design ');
+    const designLength = getValue('design.length', 'Design length ');
+    const designLengthOverall = getValue('design.length.overall', 'Design length overall ');
+    const designBeam = getValue('design.beam', 'Design beam ');
+    const designAisShipType = getValue('design.aisShipType', 'AIS ship type ');
+    
+    // Try sensors paths
+    const sensorsGps = getValue('sensors.gps', 'GPS sensors ');
+    const sensorsGpsFromBow = getValue('sensors.gps.fromBow', 'GPS from bow ');
+    const sensorsGpsFromCenter = getValue('sensors.gps.fromCenter', 'GPS from center ');
+    
+    // Also try alternative paths that might exist
+    const navigation = getValue('navigation', 'Navigation ');
+    const vesselSelf = app.getSelfPath('') || {};
+    console.log('🔍 DEBUG - Full self vessel object:', JSON.stringify(vesselSelf, null, 2));
+    
+    // Extract length with fallbacks
+    let vesselLength = 0;
+    if (typeof designLengthOverall === 'number') {
+      vesselLength = designLengthOverall;
+    } else if (typeof designLength === 'number') {
+      vesselLength = designLength;
+    } else if (designFull && designFull.length) {
+      if (typeof designFull.length.overall === 'number') {
+        vesselLength = designFull.length.overall;
+      } else if (typeof designFull.length === 'number') {
+        vesselLength = designFull.length;
+      }
+    }
+    
+    console.log('🔍 DEBUG - Extracted vessel length:', vesselLength);
     
     return {
-      mmsi: getValue('mmsi'),
-      name: getValue('name'), 
-      callsign: getValue('communication.callsignVhf'),
+      mmsi: mmsi,
+      name: name, 
+      callsign: callsign,
       design: {
-        length: lengthData.overall?.value || lengthData.overall || lengthData.value || lengthData,
-        beam: getValue('design.beam'),
-        draft: getValue('design.draft.maximum') || getValue('design.draft'),
-        aisShipType: getValue('design.aisShipType')?.id || getValue('design.aisShipType')
+        length: vesselLength,
+        beam: typeof designBeam === 'number' ? designBeam : 0,
+        draft: getValue('design.draft.maximum') || getValue('design.draft') || 0,
+        aisShipType: designAisShipType?.id || designAisShipType || 37
       },
       sensors: {
         gps: {
-          fromBow: getValue('sensors.gps.fromBow') || 0,
-          fromCenter: getValue('sensors.gps.fromCenter') || 0  
+          fromBow: typeof sensorsGpsFromBow === 'number' ? sensorsGpsFromBow : 0,
+          fromCenter: typeof sensorsGpsFromCenter === 'number' ? sensorsGpsFromCenter : 0  
         }
       }
     };
@@ -276,16 +309,17 @@ export = function(app: any): PluginInstance {
       }
     }
 
-    // Build MAIANA station command: mmsi,name,callsign,type,len,beam,portoffset,bowoffset
+    // Build MAIANA station command to match original format from maianaclient.py
+    // Format: station mmsi,name,callsign,type,len,beam,portoffset,bowoffset
     const stationParams = [
-      vesselData.mmsi || '',
-      vesselData.name || '',
-      vesselData.callsign || '',
-      shipType,
-      Math.round(vesselData.design?.length || 0),
-      Math.round(vesselData.design?.beam || 0),
-      Math.round(vesselData.sensors?.gps?.fromCenter || 0), // port offset (from center)
-      Math.round(vesselData.sensors?.gps?.fromBow || 0)     // bow offset
+      vesselData.mmsi || 123456789,     // Default MMSI if not configured
+      vesselData.name || 'VESSEL',      // Default vessel name
+      vesselData.callsign || 'CALL',    // Default callsign
+      shipType,                         // AIS ship type (30, 34, 36, or 37)
+      Math.round(vesselData.design?.length || 16),  // Length in meters (default 16m)
+      Math.round(vesselData.design?.beam || 4),     // Beam in meters (default 4m)
+      Math.round(vesselData.sensors?.gps?.fromCenter || 0), // Port offset from centerline
+      Math.round(vesselData.sensors?.gps?.fromBow || 8)     // Bow offset from GPS antenna
     ];
 
     const command = `station ${stationParams.join(',')}`;
@@ -620,7 +654,7 @@ export = function(app: any): PluginInstance {
     
     // Create PUT handler
     const putHandler = (
-      context: string,
+      _context: string,
       requestPath: string,
       value: any,
       callback?: (result: { state: string; statusCode?: number }) => void
