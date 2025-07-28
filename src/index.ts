@@ -398,15 +398,19 @@ export = function(app: any): PluginInstance {
     console.log('🔄 Rebooting MAIANA to apply station configuration');
     await maianaController.sendCommand('reboot');
     
-    // Enable transmission if configured
+    // Wait for reboot to complete before enabling transmission
+    console.log('⏳ Waiting 3 seconds for MAIANA reboot to complete...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Enable transmission AFTER reboot
     if (transmitEnabled) {
-      console.log('🔧 Sending tx on command');
+      console.log('🔧 Sending tx on command after reboot');
       await maianaController.sendCommand('tx on');
-      app.setProviderStatus('🔧 Transmission enabled via configuration');
+      app.setProviderStatus('🔧 Transmission enabled after reboot');
     } else {
-      console.log('🔧 Sending tx off command');
+      console.log('🔧 Sending tx off command after reboot');
       await maianaController.sendCommand('tx off');
-      app.setProviderStatus('🔧 Transmission disabled via configuration');
+      app.setProviderStatus('🔧 Transmission disabled after reboot');
     }
   }
 
