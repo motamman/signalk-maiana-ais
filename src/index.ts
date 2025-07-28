@@ -227,7 +227,20 @@ export = function(app: any): PluginInstance {
     const getValue = (path: string, description: string = '') => {
       const data = app.getSelfPath(path);
       console.log(`🔍 DEBUG - ${description}${path}:`, JSON.stringify(data, null, 2));
-      return data?.value !== undefined ? data.value : data;
+      
+      // SignalK values can be nested in .value property or direct
+      if (data && typeof data === 'object') {
+        if (data.value !== undefined) {
+          return data.value;
+        } else if (data.timestamp && data.source) {
+          // This looks like a SignalK value object without .value set
+          return undefined;
+        } else {
+          // This might be a plain object or nested data
+          return data;
+        }
+      }
+      return data;
     };
 
     // Try different SignalK paths that might contain vessel data
@@ -253,21 +266,68 @@ export = function(app: any): PluginInstance {
     const vesselSelf = app.getSelfPath('') || {};
     console.log('🔍 DEBUG - Full self vessel object:', JSON.stringify(vesselSelf, null, 2));
     
-    // Extract length with fallbacks
+    // Extract length with fallbacks - try drilling into nested objects
     let vesselLength = 0;
+    let vesselBeam = 0;
+    let aisShipType = 37;
+    let fromBow = 0;
+    let fromCenter = 0;
+    
+    // Try to extract length
     if (typeof designLengthOverall === 'number') {
       vesselLength = designLengthOverall;
     } else if (typeof designLength === 'number') {
       vesselLength = designLength;
     } else if (designFull && designFull.length) {
-      if (typeof designFull.length.overall === 'number') {
-        vesselLength = designFull.length.overall;
+      if (designFull.length.value !== undefined) {
+        vesselLength = designFull.length.value;
+      } else if (designFull.length.overall) {
+        if (typeof designFull.length.overall === 'number') {
+          vesselLength = designFull.length.overall;
+        } else if (designFull.length.overall.value !== undefined) {
+          vesselLength = designFull.length.overall.value;
+        }
       } else if (typeof designFull.length === 'number') {
         vesselLength = designFull.length;
       }
     }
     
-    console.log('🔍 DEBUG - Extracted vessel length:', vesselLength);
+    // Try to extract beam
+    if (typeof designBeam === 'number') {
+      vesselBeam = designBeam;
+    } else if (designBeam && designBeam.value !== undefined) {
+      vesselBeam = designBeam.value;
+    }
+    
+    // Try to extract AIS ship type
+    if (typeof designAisShipType === 'number') {
+      aisShipType = designAisShipType;
+    } else if (designAisShipType && designAisShipType.value !== undefined) {
+      aisShipType = designAisShipType.value;
+    } else if (designAisShipType && designAisShipType.id !== undefined) {
+      aisShipType = designAisShipType.id;
+    }
+    
+    // Try to extract GPS offsets
+    if (typeof sensorsGpsFromBow === 'number') {
+      fromBow = sensorsGpsFromBow;
+    } else if (sensorsGpsFromBow && sensorsGpsFromBow.value !== undefined) {
+      fromBow = sensorsGpsFromBow.value;
+    }
+    
+    if (typeof sensorsGpsFromCenter === 'number') {
+      fromCenter = sensorsGpsFromCenter;
+    } else if (sensorsGpsFromCenter && sensorsGpsFromCenter.value !== undefined) {
+      fromCenter = sensorsGpsFromCenter.value;
+    }
+    
+    console.log('🔍 DEBUG - Extracted values:', {
+      vesselLength,
+      vesselBeam, 
+      aisShipType,
+      fromBow,
+      fromCenter
+    });
     
     return {
       mmsi: mmsi,
@@ -275,14 +335,14 @@ export = function(app: any): PluginInstance {
       callsign: callsign,
       design: {
         length: vesselLength,
-        beam: typeof designBeam === 'number' ? designBeam : 0,
+        beam: vesselBeam,
         draft: getValue('design.draft.maximum') || getValue('design.draft') || 0,
-        aisShipType: designAisShipType?.id || designAisShipType || 37
+        aisShipType: aisShipType
       },
       sensors: {
         gps: {
-          fromBow: typeof sensorsGpsFromBow === 'number' ? sensorsGpsFromBow : 0,
-          fromCenter: typeof sensorsGpsFromCenter === 'number' ? sensorsGpsFromCenter : 0  
+          fromBow: fromBow,
+          fromCenter: fromCenter
         }
       }
     };
