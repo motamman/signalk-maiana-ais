@@ -394,6 +394,10 @@ export = function(app: any): PluginInstance {
     
     await maianaController.sendCommand(command);
     
+    // CRITICAL: MAIANA requires a reboot after station configuration (from original code)
+    console.log('🔄 Rebooting MAIANA to apply station configuration');
+    await maianaController.sendCommand('reboot');
+    
     // Enable transmission if configured
     if (transmitEnabled) {
       console.log('🔧 Sending tx on command');
