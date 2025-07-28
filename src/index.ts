@@ -229,9 +229,12 @@ export = function(app: any): PluginInstance {
       return data?.value !== undefined ? data.value : data;
     };
 
-    // Get the design data directly to handle nested structure
+    // Debug what we're actually getting from SignalK
     const designData = app.getSelfPath('design') || {};
     const lengthData = designData.length || {};
+    
+    console.log('🔍 DEBUG - Raw design data:', JSON.stringify(designData, null, 2));
+    console.log('🔍 DEBUG - Raw length data:', JSON.stringify(lengthData, null, 2));
     
     return {
       mmsi: getValue('mmsi'),
