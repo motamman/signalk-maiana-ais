@@ -303,6 +303,62 @@ export = function(app: any): PluginInstance {
     }
   }
 
+  function handlePAINFMessage(message: string): void {
+    // Parse MAIANA proprietary info messages: $PAINF,A,0x3d*0E
+    try {
+      const parts = message.split(',');
+      if (parts.length >= 3) {
+        const type = parts[1]; // A or B
+        const hexValue = parts[2].split('*')[0]; // Remove checksum
+        const decimalValue = parseInt(hexValue, 16);
+        
+        app.debug(`🔍 MAIANA INFO [${type}]: ${hexValue} (${decimalValue} decimal) - ${message}`);
+        
+        // Try to decode common patterns
+        if (type === 'A') {
+          decodePAINFTypeA(decimalValue, hexValue);
+        } else if (type === 'B') {
+          decodePAINFTypeB(decimalValue, hexValue);
+        }
+      }
+    } catch (error) {
+      app.debug('Could not parse PAINF message:', message, error);
+    }
+  }
+
+  function decodePAINFTypeA(value: number, hex: string): void {
+    // Type A might be device status/health
+    const bits = value.toString(2).padStart(8, '0');
+    app.debug(`🔍 PAINF Type A Analysis: ${hex} = ${value} = 0b${bits}`);
+    
+    // Common status bit patterns to look for:
+    if (value & 0x01) app.debug('  - Bit 0 set: Possible power/ready status');
+    if (value & 0x02) app.debug('  - Bit 1 set: Possible GPS status');
+    if (value & 0x04) app.debug('  - Bit 2 set: Possible transmission status');
+    if (value & 0x08) app.debug('  - Bit 3 set: Possible error/warning');
+    if (value & 0x10) app.debug('  - Bit 4 set: Unknown status flag');
+    if (value & 0x20) app.debug('  - Bit 5 set: Unknown status flag');
+    if (value & 0x40) app.debug('  - Bit 6 set: Unknown status flag');
+    if (value & 0x80) app.debug('  - Bit 7 set: Unknown status flag');
+  }
+
+  function decodePAINFTypeB(value: number, hex: string): void {
+    // Type B might be configuration/operational status
+    const bits = value.toString(2).padStart(8, '0');
+    app.debug(`🔍 PAINF Type B Analysis: ${hex} = ${value} = 0b${bits}`);
+    
+    // Look for patterns that might indicate transmission capability
+    if (value === 0x52) app.debug('  - Common value 0x52 detected');
+    if (value === 0x32) app.debug('  - Common value 0x32 detected');
+    if (value === 0x1a) app.debug('  - Common value 0x1a detected');
+    
+    // Check if this could be related to AIS transmission status
+    if (value & 0x01) app.debug('  - Bit 0 set: Could be TX ready');
+    if (value & 0x02) app.debug('  - Bit 1 set: Could be RX active');
+    if (value & 0x04) app.debug('  - Bit 2 set: Could be config valid');
+    if (value & 0x08) app.debug('  - Bit 3 set: Could be antenna status');
+  }
+
   function convertNmeaToSignalK(parsed: any): any {
     if (!parsed || !parsed.sentenceId) {
       return null;
@@ -473,7 +529,13 @@ export = function(app: any): PluginInstance {
   function handleMaianaResponse(response: string): void {
     // Handle NMEA sentences and MAIANA command responses
     if (response.startsWith('$')) {
-      // Parse NMEA sentences using nmea-simple
+      // Handle MAIANA proprietary messages specially
+      if (response.startsWith('$PAINF')) {
+        handlePAINFMessage(response);
+        return;
+      }
+      
+      // Parse standard NMEA sentences using nmea-simple
       try {
         const parsed = nmea.parseNmeaSentence(response);
         const delta = convertNmeaToSignalK(parsed);
