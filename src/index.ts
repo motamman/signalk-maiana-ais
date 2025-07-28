@@ -203,20 +203,26 @@ export = function(app: any): PluginInstance {
   }
 
   function getVesselDataFromSignalK() {
+    // Helper function to safely extract values
+    const getValue = (path: string) => {
+      const data = app.getSelfPath(path);
+      return data?.value !== undefined ? data.value : data;
+    };
+
     return {
-      mmsi: app.getSelfPath('mmsi'),
-      name: app.getSelfPath('name'),
-      callsign: app.getSelfPath('communication.callsignVhf'),
+      mmsi: getValue('mmsi'),
+      name: getValue('name'), 
+      callsign: getValue('communication.callsignVhf'),
       design: {
-        length: app.getSelfPath('design.length.overall'),
-        beam: app.getSelfPath('design.beam'),
-        draft: app.getSelfPath('design.draft.maximum'),
-        aisShipType: app.getSelfPath('design.aisShipType')
+        length: getValue('design.length.overall') || getValue('design.length'),
+        beam: getValue('design.beam'),
+        draft: getValue('design.draft.maximum') || getValue('design.draft'),
+        aisShipType: getValue('design.aisShipType')?.id || getValue('design.aisShipType')
       },
       sensors: {
         gps: {
-          fromBow: app.getSelfPath('sensors.gps.fromBow.value'),
-          fromCenter: app.getSelfPath('sensors.gps.fromCenter.value')
+          fromBow: getValue('sensors.gps.fromBow') || 0,
+          fromCenter: getValue('sensors.gps.fromCenter') || 0  
         }
       }
     };
@@ -257,7 +263,10 @@ export = function(app: any): PluginInstance {
 
     const command = `station ${stationParams.join(',')}`;
     
-    app.debug('Configuring MAIANA with command:', command);
+    app.debug('🏷️  Vessel data extracted:', JSON.stringify(vesselData, null, 2));
+    app.debug('🏷️  Station parameters:', stationParams);
+    app.debug('🏷️  Configuring MAIANA with command:', command);
+    
     await maianaController.sendCommand(command);
     
     // Enable transmission if configured
