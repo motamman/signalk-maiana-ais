@@ -229,12 +229,16 @@ export = function(app: any): PluginInstance {
       return data?.value !== undefined ? data.value : data;
     };
 
+    // Get the design data directly to handle nested structure
+    const designData = app.getSelfPath('design') || {};
+    const lengthData = designData.length || {};
+    
     return {
       mmsi: getValue('mmsi'),
       name: getValue('name'), 
       callsign: getValue('communication.callsignVhf'),
       design: {
-        length: getValue('design.length.overall') || getValue('design.length'),
+        length: lengthData.overall?.value || lengthData.overall || lengthData.value || lengthData,
         beam: getValue('design.beam'),
         draft: getValue('design.draft.maximum') || getValue('design.draft'),
         aisShipType: getValue('design.aisShipType')?.id || getValue('design.aisShipType')
