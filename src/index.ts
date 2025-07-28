@@ -406,6 +406,11 @@ export = function(app: any): PluginInstance {
     if (transmitEnabled) {
       console.log('🔧 Sending tx on command after reboot');
       await maianaController.sendCommand('tx on');
+      
+      // Query TX status to verify transmission is enabled
+      console.log('❓ Querying TX status to verify configuration');
+      await maianaController.sendCommand('tx?');
+      
       app.setProviderStatus('🔧 Transmission enabled after reboot');
     } else {
       console.log('🔧 Sending tx off command after reboot');
@@ -494,6 +499,40 @@ export = function(app: any): PluginInstance {
     if (value & 0x02) app.debug('  - Bit 1 set: Could be RX active');
     if (value & 0x04) app.debug('  - Bit 2 set: Could be config valid');
     if (value & 0x08) app.debug('  - Bit 3 set: Could be antenna status');
+  }
+
+  function handlePAITXCFGMessage(message: string): void {
+    // Parse MAIANA TX configuration status: $PAITXCFG,hwHardwired,hwSwitchOn,softEnable,hasStation,txStatus*checksum
+    try {
+      const parts = message.split(',');
+      if (parts.length >= 6) {
+        const hwHardwired = parts[1] === '1';
+        const hwSwitchOn = parts[2] === '1';
+        const softEnable = parts[3] === '1';
+        const hasStation = parts[4] === '1';
+        const txStatus = parts[5].split('*')[0] === '1';
+        
+        console.log('📡 MAIANA TX Configuration Status:');
+        console.log(`  - Hardware hardwired: ${hwHardwired ? 'YES' : 'NO'}`);
+        console.log(`  - Hardware switch on: ${hwSwitchOn ? 'YES' : 'NO'}`);
+        console.log(`  - Software enabled: ${softEnable ? 'YES' : 'NO'}`);
+        console.log(`  - Station data present: ${hasStation ? 'YES' : 'NO'}`);
+        console.log(`  - TRANSMISSION STATUS: ${txStatus ? '✅ ENABLED' : '❌ DISABLED'}`);
+        
+        if (!txStatus) {
+          const issues = [];
+          if (!hwSwitchOn) issues.push('Hardware switch disabled');
+          if (!softEnable) issues.push('Software not enabled');
+          if (!hasStation) issues.push('Station data missing');
+          
+          console.log(`⚠️  Transmission blocked by: ${issues.join(', ')}`);
+        }
+        
+        app.setProviderStatus(`📡 TX Status: ${txStatus ? 'TRANSMITTING' : 'BLOCKED'} (HW:${hwSwitchOn ? 'ON' : 'OFF'} SW:${softEnable ? 'ON' : 'OFF'} Station:${hasStation ? 'OK' : 'MISSING'})`);
+      }
+    } catch (error) {
+      app.debug('Could not parse PAITXCFG message:', message, error);
+    }
   }
 
   function convertNmeaToSignalK(parsed: any): any {
@@ -669,6 +708,9 @@ export = function(app: any): PluginInstance {
       // Handle MAIANA proprietary messages specially
       if (response.startsWith('$PAINF')) {
         handlePAINFMessage(response);
+        return;
+      } else if (response.startsWith('$PAITXCFG')) {
+        handlePAITXCFGMessage(response);
         return;
       }
       
