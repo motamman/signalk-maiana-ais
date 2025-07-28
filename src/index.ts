@@ -157,6 +157,17 @@ export = function(app: any): PluginInstance {
         const vesselData = getVesselDataFromSignalK();
         res.json(vesselData);
       });
+
+      router.get('/debug-status', (req: any, res: any) => {
+        const debugInfo = {
+          status: status,
+          transmitEnabled: transmitEnabled,
+          connected: maianaController?.isConnected() || false,
+          vesselData: getVesselDataFromSignalK(),
+          timestamp: new Date().toISOString()
+        };
+        res.json(debugInfo);
+      });
     }
   };
 
@@ -182,7 +193,10 @@ export = function(app: any): PluginInstance {
     });
 
     maianaController.on('response', (response: string) => {
-      app.debug('MAIANA response:', response);
+      // Enhanced debug logging with message classification
+      const messageType = classifyMessage(response);
+      app.debug(`MAIANA ${messageType}:`, response);
+      
       // Handle command responses and status messages
       handleMaianaResponse(response);
     });
@@ -251,6 +265,32 @@ export = function(app: any): PluginInstance {
       await maianaController.sendCommand('tx on');
     } else {
       await maianaController.sendCommand('tx off');
+    }
+  }
+
+  function classifyMessage(message: string): string {
+    if (message.startsWith('!AIVDM') || message.startsWith('!AIVDO')) {
+      return 'AIS-TX'; // Transmitted AIS message
+    } else if (message.startsWith('$GPGGA') || message.startsWith('$GNGGA')) {
+      return 'GPS-FIX';
+    } else if (message.startsWith('$GNRMC') || message.startsWith('$GPRMC')) {
+      return 'GPS-RMC';
+    } else if (message.startsWith('$GPGSV') || message.startsWith('$GLGSV')) {
+      return 'GPS-SAT';
+    } else if (message.startsWith('$GPVTG')) {
+      return 'GPS-VTG';
+    } else if (message.startsWith('$GNGSA') || message.startsWith('$GPGSA')) {
+      return 'GPS-DOP';
+    } else if (message.startsWith('$GNGLL') || message.startsWith('$GPGLL')) {
+      return 'GPS-POS';
+    } else if (message.startsWith('$')) {
+      return 'NMEA-OTHER';
+    } else if (message.includes('tx')) {
+      return 'TX-STATUS';
+    } else if (message.includes('station')) {
+      return 'STATION-CONFIG';
+    } else {
+      return 'MAIANA-CMD';
     }
   }
 
@@ -436,21 +476,38 @@ export = function(app: any): PluginInstance {
         app.debug('Could not parse NMEA sentence:', response, error);
       }
     } else if (response.startsWith('!')) {
-      // AIS data - should be handled by SignalK's built-in NMEA parser
-      // but if we get here, we can try to parse it
-      try {
-        const parsed = nmea.parseNmeaSentence(response);
-        const delta = convertNmeaToSignalK(parsed);
-        if (delta) {
-          app.handleMessage(plugin.id, delta);
+      // AIS data transmission detected!
+      status.messagesTransmitted++;
+      app.setProviderStatus(`AIS transmission detected! Total: ${status.messagesTransmitted}`);
+      
+      if (response.startsWith('!AIVDM') || response.startsWith('!AIVDO')) {
+        app.debug('🚢 AIS TRANSMISSION DETECTED:', response);
+        
+        // Try to parse and forward the AIS message
+        try {
+          const parsed = nmea.parseNmeaSentence(response);
+          const delta = convertNmeaToSignalK(parsed);
+          if (delta) {
+            app.handleMessage(plugin.id, delta);
+          }
+        } catch (error) {
+          app.debug('Could not parse transmitted AIS sentence:', response, error);
         }
-      } catch (error) {
-        app.debug('Could not parse AIS sentence:', response, error);
       }
     } else {
       // MAIANA command responses and status messages
       if (response.includes('tx')) {
-        app.debug('Transmission status response:', response);
+        app.debug('🔧 Transmission control response:', response);
+        
+        if (response.includes('tx on') || response.includes('TX ON')) {
+          status.transmitting = true;
+          app.setProviderStatus('MAIANA transmission enabled');
+        } else if (response.includes('tx off') || response.includes('TX OFF')) {
+          status.transmitting = false;
+          app.setProviderStatus('MAIANA transmission disabled');
+        }
+      } else if (response.includes('station')) {
+        app.debug('🏷️  Station configuration response:', response);
       }
     }
   }
