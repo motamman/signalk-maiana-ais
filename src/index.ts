@@ -283,17 +283,22 @@ export = function(app: any): PluginInstance {
 
     const command = `station ${stationParams.join(',')}`;
     
-    app.debug('🏷️  Vessel data extracted:', JSON.stringify(vesselData, null, 2));
-    app.debug('🏷️  Station parameters:', stationParams);
-    app.debug('🏷️  Configuring MAIANA with command:', command);
+    app.setProviderStatus('🏷️ Configuring MAIANA with vessel data...');
+    console.log('🏷️ Vessel data extracted:', JSON.stringify(vesselData, null, 2));
+    console.log('🏷️ Station parameters:', stationParams);
+    console.log('🏷️ Configuring MAIANA with command:', command);
     
     await maianaController.sendCommand(command);
     
     // Enable transmission if configured
     if (transmitEnabled) {
+      console.log('🔧 Sending tx on command');
       await maianaController.sendCommand('tx on');
+      app.setProviderStatus('🔧 Transmission enabled via configuration');
     } else {
+      console.log('🔧 Sending tx off command');
       await maianaController.sendCommand('tx off');
+      app.setProviderStatus('🔧 Transmission disabled via configuration');
     }
   }
 
