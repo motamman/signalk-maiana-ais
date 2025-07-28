@@ -16,6 +16,7 @@
 
 import { MaianaController } from './maiana-controller';
 import type { PluginOptions, MaianaStatus, PluginInstance } from './types';
+import * as nmea from 'nmea-simple';
 
 export = function(app: any): PluginInstance {
   let maianaController: MaianaController;
@@ -253,16 +254,204 @@ export = function(app: any): PluginInstance {
     }
   }
 
+  function convertNmeaToSignalK(parsed: any): any {
+    if (!parsed || !parsed.sentenceId) {
+      return null;
+    }
+
+    const timestamp = new Date().toISOString();
+    const source = {
+      sentence: parsed.sentenceId,
+      talker: parsed.talkerId || 'GP',
+      type: 'NMEA0183',
+      label: 'maiana-gps'
+    };
+
+    const values: any[] = [];
+
+    switch (parsed.sentenceId) {
+      case 'GGA':
+        // GPS Fix Data
+        if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
+          values.push({
+            path: 'navigation.position',
+            value: {
+              latitude: parsed.latitude,
+              longitude: parsed.longitude
+            }
+          });
+        }
+        if (parsed.altitude !== undefined) {
+          values.push({
+            path: 'navigation.gnss.antennaAltitude',
+            value: parsed.altitude
+          });
+        }
+        if (parsed.quality !== undefined) {
+          values.push({
+            path: 'navigation.gnss.type',
+            value: parsed.quality === 1 ? 'GPS' : 'DGPS'
+          });
+        }
+        if (parsed.satellitesInUse !== undefined) {
+          values.push({
+            path: 'navigation.gnss.satellitesInUse',
+            value: parsed.satellitesInUse
+          });
+        }
+        if (parsed.horizontalDilution !== undefined) {
+          values.push({
+            path: 'navigation.gnss.horizontalDilution',
+            value: parsed.horizontalDilution
+          });
+        }
+        break;
+
+      case 'RMC':
+        // Recommended Minimum Course
+        if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
+          values.push({
+            path: 'navigation.position',
+            value: {
+              latitude: parsed.latitude,
+              longitude: parsed.longitude
+            }
+          });
+        }
+        if (parsed.speedKnots !== undefined) {
+          values.push({
+            path: 'navigation.speedOverGround',
+            value: parsed.speedKnots * 0.514444 // Convert knots to m/s
+          });
+        }
+        if (parsed.trackTrue !== undefined) {
+          values.push({
+            path: 'navigation.courseOverGroundTrue',
+            value: parsed.trackTrue * Math.PI / 180 // Convert degrees to radians
+          });
+        }
+        break;
+
+      case 'VTG':
+        // Track Made Good and Ground Speed
+        if (parsed.speedKnots !== undefined) {
+          values.push({
+            path: 'navigation.speedOverGround',
+            value: parsed.speedKnots * 0.514444 // Convert knots to m/s
+          });
+        }
+        if (parsed.trackTrue !== undefined) {
+          values.push({
+            path: 'navigation.courseOverGroundTrue',
+            value: parsed.trackTrue * Math.PI / 180 // Convert degrees to radians
+          });
+        }
+        break;
+
+      case 'GSA':
+        // GPS DOP and Active Satellites
+        if (parsed.pdop !== undefined) {
+          values.push({
+            path: 'navigation.gnss.positionDilution',
+            value: parsed.pdop
+          });
+        }
+        if (parsed.hdop !== undefined) {
+          values.push({
+            path: 'navigation.gnss.horizontalDilution',
+            value: parsed.hdop
+          });
+        }
+        if (parsed.vdop !== undefined) {
+          values.push({
+            path: 'navigation.gnss.verticalDilution',
+            value: parsed.vdop
+          });
+        }
+        break;
+
+      case 'GSV':
+        // GPS Satellites in View
+        if (parsed.satellites && Array.isArray(parsed.satellites)) {
+          values.push({
+            path: 'navigation.gnss.satellitesInView',
+            value: {
+              count: parsed.satellitesInView || parsed.satellites.length,
+              satellites: parsed.satellites.map((sat: any) => ({
+                id: sat.prnNumber,
+                elevation: sat.elevationDegrees ? sat.elevationDegrees * Math.PI / 180 : undefined,
+                azimuth: sat.azimuthTrue ? sat.azimuthTrue * Math.PI / 180 : undefined,
+                SNR: sat.SNRdB
+              }))
+            }
+          });
+        }
+        break;
+
+      case 'GLL':
+        // Geographic Position
+        if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
+          values.push({
+            path: 'navigation.position',
+            value: {
+              latitude: parsed.latitude,
+              longitude: parsed.longitude
+            }
+          });
+        }
+        break;
+
+      default:
+        // Unsupported sentence type
+        return null;
+    }
+
+    if (values.length === 0) {
+      return null;
+    }
+
+    return {
+      context: 'vessels.self',
+      updates: [{
+        source: source,
+        $source: `maiana-gps.${source.talker}`,
+        timestamp: timestamp,
+        values: values
+      }]
+    };
+  }
+
   function handleMaianaResponse(response: string): void {
-    // Handle MAIANA command responses and status messages
-    // AIS data (!AIVDM/!AIVDO) is handled by SignalK data connection
-    app.debug('MAIANA response:', response);
-    
-    // Parse any status information from responses
-    // Most responses are just acknowledgments or error messages
-    if (response.includes('tx')) {
-      // Could parse transmission status updates here
-      app.debug('Transmission status response:', response);
+    // Handle NMEA sentences and MAIANA command responses
+    if (response.startsWith('$')) {
+      // Parse NMEA sentences using nmea-simple
+      try {
+        const parsed = nmea.parseNmeaSentence(response);
+        const delta = convertNmeaToSignalK(parsed);
+        if (delta) {
+          app.handleMessage(plugin.id, delta);
+        }
+      } catch (error) {
+        // Ignore parsing errors for unsupported NMEA sentences
+        app.debug('Could not parse NMEA sentence:', response, error);
+      }
+    } else if (response.startsWith('!')) {
+      // AIS data - should be handled by SignalK's built-in NMEA parser
+      // but if we get here, we can try to parse it
+      try {
+        const parsed = nmea.parseNmeaSentence(response);
+        const delta = convertNmeaToSignalK(parsed);
+        if (delta) {
+          app.handleMessage(plugin.id, delta);
+        }
+      } catch (error) {
+        app.debug('Could not parse AIS sentence:', response, error);
+      }
+    } else {
+      // MAIANA command responses and status messages
+      if (response.includes('tx')) {
+        app.debug('Transmission status response:', response);
+      }
     }
   }
 
