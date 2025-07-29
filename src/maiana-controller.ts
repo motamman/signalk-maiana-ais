@@ -24,7 +24,7 @@ export class MaianaController extends EventEmitter {
   private baudRate: number;
   private connected = false;
   private reconnectTimer?: NodeJS.Timeout;
-  private reconnectInterval = 5000;
+  private reconnectInterval = 30000; // Reduce reconnection frequency to 30 seconds
 
   constructor(options: PluginOptions) {
     super();
